@@ -1,0 +1,21 @@
+# Virtual environment
+venv/
+ 
+# Environment variables (contains secret keys — NEVER commit)
+.env
+ 
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+ 
+# Raw data and generated files (large files, not for Git)
+data/
+models/
+# Mac system files
+.DS_Store
+ 
+# IDE
+.vscode/
+.idea/
