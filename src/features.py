@@ -1,5 +1,5 @@
 # src/features.py
-# ── Feature engineering for fraud detection pipeline ──────────────
+# Feature engineering for fraud detection pipeline 
 import numpy as np
 import pandas as pd
 
