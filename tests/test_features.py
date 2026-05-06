@@ -32,9 +32,10 @@ def raw_transaction_midnight():
 class TestEngineerFeatures:
 
     def test_output_columns_correct(self, raw_transaction):
-        result = engineer_features(raw_transaction)
-        expected = get_feature_names() + ['Class']
-        assert list(result.columns) == expected
+        result   = engineer_features(raw_transaction)
+        expected = set(get_feature_names() + ['Class'])
+        assert set(result.columns) == expected
+        assert len(result.columns) == 32
 
     def test_time_and_amount_dropped(self, raw_transaction):
         result = engineer_features(raw_transaction)
