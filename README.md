@@ -35,6 +35,7 @@ Credit card fraud detection is a class imbalance problem at industrial scale —
 
 TRAINING PIPELINE (offline, runs once)
 ──────────────────────────────────────────────────────────────────
+```
 creditcard.csv
 │
 ▼
@@ -92,7 +93,7 @@ src/evaluate.py         format_shap_explanation()
 ▼
 api/schema.py           TransactionResponse
 decision + probability + confidence_tier + explanation
-
+```
 ## Dataset
 
 | Property | Value |
@@ -130,7 +131,7 @@ The V1–V28 features are PCA-transformed components from the original transacti
 
 
 ## Project Structure
-
+```
 FraudDetection/
 │
 ├── api/
@@ -174,8 +175,7 @@ FraudDetection/
 ├── Dockerfile
 ├── README.md
 └── requirements.txt
-
----
+```
 
 ## Pipeline Stages
 
