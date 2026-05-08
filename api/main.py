@@ -1,5 +1,5 @@
 # api/main.py
-# ── Fraud Detection REST API ───────────────────────────────────────
+# Fraud Detection REST API 
 from fastapi import FastAPI, HTTPException
 from api.schema import TransactionRequest, TransactionResponse
 from api.predictor import FraudPredictor
