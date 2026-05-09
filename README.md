@@ -32,9 +32,10 @@ Credit card fraud detection is a class imbalance problem at industrial scale —
 ---
 
 ## Architecture
-```
+
 TRAINING PIPELINE (offline, runs once)
-──────────────────────────────────────────────────────────────────
+───────────────────────────────────────
+```
 creditcard.csv
 │
 ▼
@@ -175,7 +176,6 @@ FraudDetection/
 ├── README.md
 └── requirements.txt
 ```
----
 
 ## Pipeline Stages
 
