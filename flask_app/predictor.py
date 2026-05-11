@@ -17,7 +17,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # AutoGluon import
-# We only import TabularPredictor — the class that loads and runs
+# We only import TabularPredictor the class that loads and runs
 # the trained AutoGluon ensemble. We don't need to retrain anything.
 from autogluon.tabular import TabularPredictor
 
@@ -80,7 +80,7 @@ class FraudPredictor:
         self.global_max  = norm_params['global_max']
 
         # Load decision threshold
-        # 0.41 — the threshold that maximised F1-Score during
+        # 0.41 the threshold that maximised F1-Score during
         # threshold tuning in Notebook 3
         self.threshold = joblib.load(
             os.path.join(MODELS_DIR, 'threshold.joblib')
@@ -88,7 +88,7 @@ class FraudPredictor:
 
         # Load AutoGluon predictor 
         # TabularPredictor.load() reads the entire AutoGluon model
-        # directory — all base models and the weighted ensemble
+        # directory all base models and the weighted ensemble
         # This is AutoGluon's own persistence format, not joblib
         self.predictor = TabularPredictor.load(AG_PATH)
 
@@ -127,7 +127,7 @@ class FraudPredictor:
 
         # step 2 — Scale features using saved StandardScaler
         # transform() applies the saved scaler parameters
-        # We never call fit_transform() here — that would refit
+        # We never call fit_transform() here that would refit
         # the scaler on a single transaction which is meaningless
         scaled_array = self.scaler.transform(raw_df)
         scaled_df    = pd.DataFrame(
@@ -207,6 +207,6 @@ class FraudPredictor:
 # Python imports are cached this block runs exactly once when
 # Flask first imports predictor.py. Every subsequent request
 # reuses the same FraudPredictor instance already in memory.
-# Loading a full AutoGluon ensemble takes several seconds —
+# Loading a full AutoGluon ensemble takes several seconds
 # doing it per-request would make the app unusably slow.
 predictor = FraudPredictor()
