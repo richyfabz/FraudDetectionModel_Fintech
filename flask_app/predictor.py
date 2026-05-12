@@ -106,14 +106,14 @@ class FraudPredictor:
         print(f"Features:  {len(self.feature_names)} + anomaly_score")
 
 
-    def predict(self, raw_input: dict) -> dict:
+    def predict(self, raw_input: dict, model_name: str = None) -> dict:
         """
         Run the full prediction pipeline for one transaction.
 
         Args:
-            raw_input: dict with keys matching feature_names
-                       Values are raw unscaled transaction fields
-
+            raw_input:  dict with keys matching feature_names
+        model_name: optional AutoGluon model to use.
+                    None uses the best model automatically.
         Returns:
             dict with decision, probability, confidence tier,
             threshold used, and feature values for display
@@ -157,10 +157,15 @@ class FraudPredictor:
         scaled_df['anomaly_score'] = anomaly_score
 
         # step 6 — AutoGluon prediction 
-        # predict_proba() returns a DataFrame with two columns:
-        # column 0 = P(legitimate), column 1 = P(fraud)
-        # We extract P(fraud) for threshold comparison
-        proba_df   = self.predictor.predict_proba(scaled_df)
+        # If model_name is provided, score with that specific model
+    # If None, AutoGluon uses WeightedEnsemble automatically
+        if model_name:
+            proba_df = self.predictor.predict_proba(
+            scaled_df, model=model_name
+         )
+        else:
+            proba_df = self.predictor.predict_proba(scaled_df)
+
         fraud_prob = float(proba_df[1].iloc[0])
 
         # step 7 — Apply threshold 
