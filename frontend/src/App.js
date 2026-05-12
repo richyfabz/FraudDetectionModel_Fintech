@@ -3,12 +3,16 @@ import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
 import {
   ShieldCheck, AlertOctagon, ArrowRight,
-  ArrowLeft, Loader2, RefreshCw, Activity
+  ArrowLeft, Loader2, RefreshCw, Activity,
+  Database, ChevronDown
 } from 'lucide-react';
 
-// Feature groups 
-// We split the 30 features into logical steps so the form
-// doesn't overwhelm the user with all fields at once
+// Import the 20 real test set transactions 
+// These are unscaled values extracted directly from the test set
+// 10 fraud + 10 legitimate — all with known ground truth labels
+import SAMPLE_TRANSACTIONS from './sampleTransactions.json';
+
+// Feature groups — split across 4 form steps 
 const STEP_CONFIG = [
   {
     title:    'Core Transaction Details',
@@ -35,22 +39,7 @@ const STEP_CONFIG = [
   }
 ];
 
-// Known fraud transaction for demo 
-const FRAUD_EXAMPLE = {
-  Time: 406.0, Amount: 229.15,
-  V1: -3.043541, V2: -3.157307, V3:  1.088463,
-  V4:  2.288282, V5:  1.359805, V6: -1.064823,
-  V7: -3.216816, V8:  0.963958, V9: -4.498295,
-  V10: -1.903324, V11: 1.453888, V12: -2.833819,
-  V13: -0.764650, V14: -4.941888, V15: 0.392831,
-  V16: -1.140788, V17: -2.459499, V18: -1.637940,
-  V19: 0.774543,  V20: 0.034249,  V21: 0.641673,
-  V22: 0.339485,  V23: -0.182899, V24: 0.551707,
-  V25: 0.239334,  V26: 0.406271,  V27: 0.222938,
-  V28: 0.027510
-};
-
-// Default empty form state
+// Default empty form — all fields start blank 
 const DEFAULT_FORM = {
   Time: '', Amount: '',
   ...Object.fromEntries(
@@ -58,10 +47,12 @@ const DEFAULT_FORM = {
   )
 };
 
-// Animation variants 
+// Framer Motion animation variants 
+// slideVariants — used for step transitions (slides left/right)
+// resultVariants — used for result reveal (scales up from smaller)
 const slideVariants = {
   hidden:  { opacity: 0, x: 60 },
-  visible: { opacity: 1, x: 0, transition: { duration: 0.35 } },
+  visible: { opacity: 1, x: 0,  transition: { duration: 0.35 } },
   exit:    { opacity: 0, x: -60, transition: { duration: 0.25 } }
 };
 
@@ -70,7 +61,8 @@ const resultVariants = {
   visible: { opacity: 1, scale: 1, transition: { duration: 0.4 } }
 };
 
-// Confidence tier config 
+// Confidence tier visual config 
+// Maps each tier to a color set used in the result badge
 const TIER_CONFIG = {
   HIGH:   { color: 'text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/30'    },
   MEDIUM: { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30' },
@@ -80,47 +72,68 @@ const TIER_CONFIG = {
 
 
 export default function App() {
-  const [step, setStep]         = useState(0);
-  const [formData, setFormData] = useState(DEFAULT_FORM);
-  const [loading, setLoading]   = useState(false);
-  const [result, setResult]     = useState(null);
-  const [error, setError]       = useState(null);
+  // Component state 
+  const [step, setStep]                   = useState(0);
+  const [formData, setFormData]           = useState(DEFAULT_FORM);
+  const [loading, setLoading]             = useState(false);
+  const [result, setResult]               = useState(null);
+  const [error, setError]                 = useState(null);
+
+  // selectedSample tracks which dropdown option is selected
+  // null means no sample loaded — user is entering manually
+  const [selectedSample, setSelectedSample] = useState(null);
+
+  // showSelector toggles the sample transaction panel open/closed
+  const [showSelector, setShowSelector]   = useState(false);
 
   const totalSteps = STEP_CONFIG.length;
   const isLastStep = step === totalSteps - 1;
 
-  // Input handler
+  // Input handler — updates a single field in formData 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  // Load fraud example 
-  const loadExample = () => {
+  // Load a sample transaction into the form 
+  // Converts all numeric values to strings because HTML inputs
+  // always work with strings — handleChange does the same
+  const loadSample = (sample) => {
     const stringified = Object.fromEntries(
-      Object.entries(FRAUD_EXAMPLE).map(([k, v]) => [k, String(v)])
+      Object.entries(sample.data).map(([k, v]) => [k, String(v)])
     );
     setFormData(stringified);
+    setSelectedSample(sample);
+    setShowSelector(false);  // close the panel after selection
+    setStep(0);              // return to step 1 so user can review
+    setResult(null);         // clear any previous result
+    setError(null);
   };
 
-  // Navigate steps
+  // Clear selected sample and reset form 
+  const clearSample = () => {
+    setFormData(DEFAULT_FORM);
+    setSelectedSample(null);
+  };
+
+  // Step navigation ─ next moves forward, back moves backward
   const next = () => {
-    if (isLastStep) {
-      submit();
-    } else {
-      setStep(s => s + 1);
-    }
+    if (isLastStep) submit();
+    else setStep(s => s + 1);
   };
-  const back = () => setStep(s => s - 1);
+  const back  = () => setStep(s => s - 1);
 
-  // Reset everything to start a new prediction 
+  // Full reset — returns to blank step 1 
   const reset = () => {
     setStep(0);
     setFormData(DEFAULT_FORM);
     setResult(null);
     setError(null);
+    setSelectedSample(null);
   };
 
-  // Submit to Flask API and get prediction 
+  // Submit to Flask API 
+  // Converts all string form values to floats before sending
+  // Flask expects numeric values, not strings
   const submit = async () => {
     setLoading(true);
     setError(null);
@@ -143,21 +156,27 @@ export default function App() {
     }
   };
 
-  //  Progress bar width 
+  // Progress bar percentage calculation 
   const progress = ((step + 1) / totalSteps) * 100;
+
+  // Separate samples by label for the selector panel
+  const fraudSamples = SAMPLE_TRANSACTIONS.filter(t => t.label === 'FRAUD');
+  const legitSamples = SAMPLE_TRANSACTIONS.filter(t => t.label === 'LEGITIMATE');
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100
                     flex flex-col items-center justify-center p-4">
 
-      {/* Header */}
+      {/* Header  */}
       <header className="mb-8 text-center">
         <div className="flex items-center justify-center gap-3 mb-2">
-          <div className="p-2 bg-blue-500/20 rounded-xl border border-blue-500/30">
+          <div className="p-2 bg-blue-500/20 rounded-xl
+                         border border-blue-500/30">
             <Activity className="text-blue-400" size={28} />
           </div>
           <h1 className="text-3xl font-bold tracking-tight">
-            FraudGuard <span className="text-slate-500 font-light">Engine</span>
+            FraudGuard{' '}
+            <span className="text-slate-500 font-light">Engine</span>
           </h1>
         </div>
         <p className="text-slate-400 text-sm">
@@ -165,11 +184,142 @@ export default function App() {
         </p>
       </header>
 
-      {/* Main card */}
-      <div className="w-full max-w-2xl bg-slate-900 border border-slate-700/50
-                      rounded-2xl shadow-2xl overflow-hidden">
+      {/* Sample transaction selector  */}
+      {/* This panel lets the user pick a real test set transaction */}
+      {/* instead of manually entering all 30 values              */}
+      {!result && (
+        <div className="w-full max-w-2xl mb-4">
 
-        {/* Progress bar */}
+          {/* Toggle button */}
+          <button
+            onClick={() => setShowSelector(s => !s)}
+            className="w-full flex items-center justify-between
+                       px-4 py-3 bg-slate-800/60 border
+                       border-slate-700/50 rounded-xl
+                       hover:border-blue-500/50 transition-all
+                       text-slate-300 hover:text-white"
+          >
+            <div className="flex items-center gap-2">
+              <Database size={16} className="text-blue-400" />
+              <span className="text-sm font-medium">
+                {selectedSample
+                  ? `Loaded: ${selectedSample.description}`
+                  : 'Load a real test transaction (10 fraud + 10 legitimate)'
+                }
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {/* Show the known label badge when a sample is loaded */}
+              {selectedSample && (
+                <span className={`text-xs px-2 py-0.5 rounded-full
+                  font-semibold border
+                  ${selectedSample.label === 'FRAUD'
+                    ? 'text-red-400 bg-red-500/10 border-red-500/30'
+                    : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
+                  }`}>
+                  {selectedSample.label}
+                </span>
+              )}
+              <ChevronDown
+                size={16}
+                className={`transition-transform
+                  ${showSelector ? 'rotate-180' : ''}`}
+              />
+            </div>
+          </button>
+
+          {/* Dropdown panel — shown when showSelector is true */}
+          <AnimatePresence>
+            {showSelector && (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.2 }}
+                className="mt-2 bg-slate-800 border border-slate-700
+                           rounded-xl overflow-hidden shadow-2xl"
+              >
+                <div className="grid grid-cols-2 divide-x
+                               divide-slate-700">
+
+                  {/* Fraud column */}
+                  <div className="p-3">
+                    <p className="text-xs font-semibold text-red-400
+                                 uppercase tracking-wider mb-2 px-1">
+                      Fraud Transactions
+                    </p>
+                    {fraudSamples.map(sample => (
+                      <button
+                        key={sample.id}
+                        onClick={() => loadSample(sample)}
+                        className="w-full text-left px-3 py-2 rounded-lg
+                                   hover:bg-red-500/10 transition-colors
+                                   text-sm text-slate-300
+                                   hover:text-red-300 mb-1"
+                      >
+                        {/* Show description and amount */}
+                        <span className="block font-mono">
+                          {sample.description}
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          True label: FRAUD
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Legitimate column */}
+                  <div className="p-3">
+                    <p className="text-xs font-semibold
+                                 text-emerald-400 uppercase
+                                 tracking-wider mb-2 px-1">
+                      Legitimate Transactions
+                    </p>
+                    {legitSamples.map(sample => (
+                      <button
+                        key={sample.id}
+                        onClick={() => loadSample(sample)}
+                        className="w-full text-left px-3 py-2 rounded-lg
+                                   hover:bg-emerald-500/10 transition-colors
+                                   text-sm text-slate-300
+                                   hover:text-emerald-300 mb-1"
+                      >
+                        <span className="block font-mono">
+                          {sample.description}
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          True label: LEGITIMATE
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                </div>
+
+                {/* Clear button at the bottom of the panel */}
+                {selectedSample && (
+                  <div className="border-t border-slate-700 p-2">
+                    <button
+                      onClick={clearSample}
+                      className="w-full text-xs text-slate-500
+                                 hover:text-slate-300 py-1 transition-colors"
+                    >
+                      Clear selection — enter values manually
+                    </button>
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
+
+      {/* Main card  */}
+      <div className="w-full max-w-2xl bg-slate-900
+                      border border-slate-700/50 rounded-2xl
+                      shadow-2xl overflow-hidden">
+
+        {/* Progress bar — hidden on result screen */}
         {!result && (
           <div className="h-1 bg-slate-800">
             <motion.div
@@ -192,6 +342,30 @@ export default function App() {
                 animate="visible"
                 className="text-center"
               >
+                {/* Known label banner — shown when a sample was used */}
+                {selectedSample && (
+                  <div className="mb-6 px-4 py-2 bg-slate-800
+                                 border border-slate-600 rounded-xl
+                                 text-sm text-slate-400">
+                    Ground truth label:{' '}
+                    <span className={`font-bold
+                      ${selectedSample.label === 'FRAUD'
+                        ? 'text-red-400' : 'text-emerald-400'
+                      }`}>
+                      {selectedSample.label}
+                    </span>
+                    {' '}—{' '}
+                    {result.decision === selectedSample.label
+                      ? <span className="text-emerald-400">
+                          Model prediction correct ✓
+                        </span>
+                      : <span className="text-orange-400">
+                          Model prediction incorrect ✗
+                        </span>
+                    }
+                  </div>
+                )}
+
                 {/* Decision icon */}
                 <div className={`inline-flex p-5 rounded-full mb-6
                   ${result.decision === 'FRAUD'
@@ -204,7 +378,7 @@ export default function App() {
                   }
                 </div>
 
-                {/* Decision label */}
+                {/* Decision text */}
                 <h2 className={`text-5xl font-black tracking-tight mb-2
                   ${result.decision === 'FRAUD'
                     ? 'text-red-400' : 'text-emerald-400'
@@ -216,8 +390,8 @@ export default function App() {
                 {(() => {
                   const tier = TIER_CONFIG[result.confidence_tier];
                   return (
-                    <span className={`inline-block px-4 py-1 rounded-full
-                      text-sm font-semibold border mb-8
+                    <span className={`inline-block px-4 py-1
+                      rounded-full text-sm font-semibold border mb-8
                       ${tier.color} ${tier.bg} ${tier.border}`}>
                       {result.confidence_tier} CONFIDENCE
                     </span>
@@ -245,11 +419,14 @@ export default function App() {
                     }
                   ].map(({ label, value, color }) => (
                     <div key={label}
-                      className="bg-slate-800/60 border border-slate-700/50
-                                 rounded-xl p-4">
-                      <p className="text-xs text-slate-500 uppercase
-                                   tracking-wider mb-1">{label}</p>
-                      <p className={`text-2xl font-mono font-bold ${color}`}>
+                      className="bg-slate-800/60 border
+                                 border-slate-700/50 rounded-xl p-4">
+                      <p className="text-xs text-slate-500
+                                   uppercase tracking-wider mb-1">
+                        {label}
+                      </p>
+                      <p className={`text-2xl font-mono
+                                    font-bold ${color}`}>
                         {value}
                       </p>
                     </div>
@@ -257,8 +434,9 @@ export default function App() {
                 </div>
 
                 {/* Key feature values */}
-                <div className="bg-slate-800/40 border border-slate-700/50
-                                rounded-xl p-4 mb-8 text-left">
+                <div className="bg-slate-800/40 border
+                               border-slate-700/50 rounded-xl
+                               p-4 mb-8 text-left">
                   <p className="text-xs text-slate-500 uppercase
                                tracking-wider mb-3">
                     Key Feature Values
@@ -267,11 +445,15 @@ export default function App() {
                     {['V14', 'V17', 'V4', 'V12'].map(f => (
                       <div key={f}
                         className="flex justify-between items-center
-                                   bg-slate-900/60 rounded-lg px-3 py-2">
+                                   bg-slate-900/60 rounded-lg
+                                   px-3 py-2">
                         <span className="text-slate-400 text-sm
                                         font-mono">{f}</span>
-                        <span className="text-slate-200 text-sm font-mono">
-                          {parseFloat(result.raw_input[f]).toFixed(4)}
+                        <span className="text-slate-200 text-sm
+                                        font-mono">
+                          {parseFloat(
+                            result.raw_input[f]
+                          ).toFixed(4)}
                         </span>
                       </div>
                     ))}
@@ -281,10 +463,12 @@ export default function App() {
                 {/* Reset button */}
                 <button
                   onClick={reset}
-                  className="flex items-center gap-2 mx-auto px-6 py-3
-                             bg-slate-800 hover:bg-slate-700 border
-                             border-slate-600 rounded-xl transition-all
-                             text-slate-300 hover:text-white"
+                  className="flex items-center gap-2 mx-auto
+                             px-6 py-3 bg-slate-800
+                             hover:bg-slate-700 border
+                             border-slate-600 rounded-xl
+                             transition-all text-slate-300
+                             hover:text-white"
                 >
                   <RefreshCw size={16} />
                   New Prediction
@@ -292,7 +476,7 @@ export default function App() {
               </motion.div>
 
             ) : (
-              /* Form steps */
+              /* Form steps  */
               <motion.div
                 key={`step-${step}`}
                 variants={slideVariants}
@@ -302,22 +486,25 @@ export default function App() {
               >
                 {/* Step header */}
                 <div className="mb-6">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs text-blue-400 font-semibold
-                                    uppercase tracking-wider">
-                      Step {step + 1} of {totalSteps}
+                  <span className="text-xs text-blue-400
+                                  font-semibold uppercase
+                                  tracking-wider">
+                    Step {step + 1} of {totalSteps}
+                  </span>
+
+                  {/* Show loaded sample info if present */}
+                  {selectedSample && (
+                    <span className={`ml-3 text-xs px-2 py-0.5
+                      rounded-full font-semibold border
+                      ${selectedSample.label === 'FRAUD'
+                        ? 'text-red-400 bg-red-500/10 border-red-500/30'
+                        : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
+                      }`}>
+                      {selectedSample.description}
                     </span>
-                    {step === 0 && (
-                      <button
-                        onClick={loadExample}
-                        className="text-xs text-slate-400 hover:text-blue-400
-                                   transition-colors underline underline-offset-2"
-                      >
-                        Load fraud example
-                      </button>
-                    )}
-                  </div>
-                  <h2 className="text-xl font-bold">
+                  )}
+
+                  <h2 className="text-xl font-bold mt-1">
                     {STEP_CONFIG[step].title}
                   </h2>
                   <p className="text-slate-400 text-sm mt-1">
@@ -325,17 +512,16 @@ export default function App() {
                   </p>
                 </div>
 
-                {/* Input fields */}
+                {/* Input fields grid */}
                 <div className="grid grid-cols-2 gap-3 mb-8">
                   {STEP_CONFIG[step].fields.map(field => (
                     <div key={field}>
-                      <label className="block text-xs text-slate-400
-                                       mb-1 font-medium">
-                        {field === 'Time'
-                          ? 'Time (seconds)'
-                          : field === 'Amount'
-                          ? 'Amount (€)'
-                          : field}
+                      <label className="block text-xs
+                                       text-slate-400 mb-1
+                                       font-medium">
+                        {field === 'Time'   ? 'Time (seconds)'
+                        : field === 'Amount' ? 'Amount (€)'
+                        : field}
                       </label>
                       <input
                         type="number"
@@ -344,22 +530,26 @@ export default function App() {
                         onChange={handleChange}
                         step="any"
                         placeholder="0.000000"
-                        className="w-full bg-slate-800 border border-slate-700
-                                   rounded-lg px-3 py-2.5 text-sm font-mono
-                                   text-slate-100 placeholder-slate-600
-                                   focus:outline-none focus:border-blue-500
-                                   focus:ring-1 focus:ring-blue-500/50
+                        className="w-full bg-slate-800 border
+                                   border-slate-700 rounded-lg
+                                   px-3 py-2.5 text-sm font-mono
+                                   text-slate-100
+                                   placeholder-slate-600
+                                   focus:outline-none
+                                   focus:border-blue-500
+                                   focus:ring-1
+                                   focus:ring-blue-500/50
                                    transition-colors"
                       />
                     </div>
                   ))}
                 </div>
 
-                {/* Error display */}
+                {/* Error message */}
                 {error && (
                   <div className="mb-4 px-4 py-3 bg-red-500/10
-                                 border border-red-500/30 rounded-xl
-                                 text-red-400 text-sm">
+                                 border border-red-500/30
+                                 rounded-xl text-red-400 text-sm">
                     {error}
                   </div>
                 )}
@@ -370,8 +560,9 @@ export default function App() {
                     <button
                       onClick={back}
                       className="flex items-center gap-2 px-5 py-3
-                                 bg-slate-800 hover:bg-slate-700 border
-                                 border-slate-600 rounded-xl transition-all
+                                 bg-slate-800 hover:bg-slate-700
+                                 border border-slate-600
+                                 rounded-xl transition-all
                                  text-slate-300"
                     >
                       <ArrowLeft size={16} />
@@ -382,14 +573,18 @@ export default function App() {
                   <button
                     onClick={next}
                     disabled={loading}
-                    className="flex-1 flex items-center justify-center
-                               gap-2 py-3 bg-blue-600 hover:bg-blue-500
-                               disabled:opacity-50 disabled:cursor-not-allowed
-                               rounded-xl font-semibold transition-all"
+                    className="flex-1 flex items-center
+                               justify-center gap-2 py-3
+                               bg-blue-600 hover:bg-blue-500
+                               disabled:opacity-50
+                               disabled:cursor-not-allowed
+                               rounded-xl font-semibold
+                               transition-all"
                   >
                     {loading ? (
                       <>
-                        <Loader2 size={18} className="animate-spin" />
+                        <Loader2 size={18}
+                          className="animate-spin" />
                         Analysing...
                       </>
                     ) : isLastStep ? (
