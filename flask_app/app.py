@@ -72,7 +72,8 @@ def list_models():
         'KNeighborsUnif_BAG_L1':   'K-Nearest Neighbors Uniform — L1',
     }
 
-    best = predictor.predictor.get_model_best()
+    # In AutoGluon 1.0+, use model_best instead of get_model_best()
+    best = predictor.predictor.model_best
 
     models = [
         {

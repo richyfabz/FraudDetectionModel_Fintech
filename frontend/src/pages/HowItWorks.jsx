@@ -29,7 +29,7 @@ const PIPELINE_STAGES = [
     color:   'border-slate-500',
     icon:    Clock,
     iconCol: 'text-slate-400',
-    desc:    'Raw transaction arrives with 30 features — Time, Amount, and V1–V28. No feature engineering is applied. Time and Amount are kept in their original form because Isolation Forest needs raw values to detect anomalies accurately.',
+    desc:    'Raw transaction arrives with 30 features Time, Amount, and V1–V28. No feature engineering is applied. Time and Amount are kept in their original form because Isolation Forest needs raw values to detect anomalies accurately.',
     code:    `# All 30 features kept raw nothing dropped
 features = ['Time'] + [f'V{i}' for i in range(1,29)] + ['Amount']`
   },
@@ -263,8 +263,8 @@ export default function HowItWorks() {
   const METRICS = [
     { label: 'AUC-ROC',          value: '0.9610', desc: 'Ranks fraud above legitimate 96.1% of the time' },
     { label: 'F1-Score (Tuned)', value: '0.8939', desc: 'Best balance of precision and recall at threshold 0.397' },
-    { label: 'Fraud Precision',  value: '97%',    desc: 'Of all fraud flags — 97% are genuine fraud' },
-    { label: 'Fraud Recall',     value: '82%',    desc: 'Of all actual fraud — 82% are caught' },
+    { label: 'Fraud Precision',  value: '97%',    desc: 'Of all fraud flags, 97% are genuine fraud' },
+    { label: 'Fraud Recall',     value: '82%',    desc: 'Of all actual fraud, 82% are caught' },
     { label: 'False Alarms',     value: '4',      desc: 'Legitimate transactions wrongly blocked out of 84,976' },
     { label: 'Train/Test Gap',   value: '0.03%',  desc: 'Near-zero gap confirms no overfitting' },
   ];
@@ -395,7 +395,7 @@ export default function HowItWorks() {
           AutoGluon Model Leaderboard
         </h2>
         <p className="text-slate-400 mb-6 text-sm">
-          Live data from the Flask API — all models trained within
+          Live data from the Flask API all models trained within
           the 10-minute AutoGluon budget ranked by accuracy.
         </p>
 
@@ -468,7 +468,7 @@ export default function HowItWorks() {
                                     bg-blue-500/10
                                     border border-blue-500/30
                                     text-blue-400">
-                      Default ⭐
+                      Default 
                     </span>
                   ) : (
                     <span className="text-xs text-slate-600">
