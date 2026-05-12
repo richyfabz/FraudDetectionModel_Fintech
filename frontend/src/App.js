@@ -1,6 +1,12 @@
+// Router setup maps URLs to page components 
+// BrowserRouter wraps the whole app enabling React Router
+// Routes defines which component renders at each URL path
+// Navbar sits outside Routes so it appears on every page
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import Navbar from './components/Navbar';
 import {
   ShieldCheck, AlertOctagon, ArrowRight,
   ArrowLeft, Loader2, RefreshCw, Activity,
@@ -9,8 +15,48 @@ import {
 
 // Import the 20 real test set transactions 
 // These are unscaled values extracted directly from the test set
-// 10 fraud + 10 legitimate — all with known ground truth labels
+// 10 fraud + 10 legitimate all with known ground truth labels
 import SAMPLE_TRANSACTIONS from './sampleTransactions.json';
+
+// Page imports each is a separate full-page component 
+import Landing     from './pages/Landing';
+import HowItWorks  from './pages/HowItWorks';
+import FeatureGuide from './pages/FeatureGuide';
+import Analyser    from './pages/Analyser';
+import BulkUpload  from './pages/BulkUpload';
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      {/* Dark background applied globally */}
+      <div className="min-h-screen bg-slate-950 text-slate-100">
+
+        {/* Navbar fixed at top always visible  */}
+        <Navbar />
+
+        {/* Page content offset by navbar height (64px)  */}
+        <main className="pt-16">
+          <Routes>
+            {/* Home / Landing */}
+            <Route path="/" element={<Landing />}/>
+
+            {/* How It Works — pipeline + model explanations */}
+            <Route path="/how-it-works" element={<HowItWorks />}   />
+
+            {/* Feature Guide — V1-V28 explained */}
+            <Route path="/features" element={<FeatureGuide />} />
+
+            {/* Single transaction analyser */}
+            <Route path="/analyse" element={<Analyser />}     />
+
+            {/* Bulk CSV upload */}
+            <Route path="/bulk" element={<BulkUpload />}   />
+          </Routes>
+        </main>
+      </div>
+    </BrowserRouter>
+  );
+}
 
 // Feature groups — split across 4 form steps 
 const STEP_CONFIG = [
