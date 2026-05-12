@@ -21,7 +21,7 @@ A production-grade fraud detection system built on the Kaggle Credit Card Fraud 
 
 ## Project Overview
 
-Credit card fraud detection is a class imbalance problem at industrial scale — 99.83% of transactions are legitimate and only 0.17% are fraudulent. A naive model that predicts every transaction as legitimate achieves 99.83% accuracy while catching zero fraud. This project solves that problem through a combination of:
+Credit card fraud detection is a class imbalance problem at an industrial scale 99.83% of transactions are legitimate and only 0.17% are fraudulent. A naive model that predicts every transaction as legitimate achieves 99.83% accuracy while catching zero fraud. This project solves that problem through a combination of:
 
 - **SMOTE** to synthetically balance the training set without touching the test set
 - **Stacking ensemble** to combine the complementary strengths of gradient boosting and bagging
