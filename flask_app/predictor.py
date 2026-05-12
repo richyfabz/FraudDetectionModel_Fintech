@@ -1,8 +1,9 @@
 # flask_app/predictor.py
-# Fraud prediction logic for Flask application
-# This file loads all trained artefacts once when the Flask app
-# starts and exposes a single predict() function that the routes
-# in app.py call for every form submission
+# Fraud prediction engine for FraudGuard Flask application
+# Loads all trained artefacts once at startup and exposes:
+# - predict()     → single transaction scoring
+# - get_models()  → list of available AutoGluon models
+# Both are called by app.py routes and never retrain anything.
 
 import numpy as np
 import pandas as pd
@@ -11,196 +12,220 @@ import os
 import sys
 
 # Add project root to Python path 
-# Flask runs from inside flask_app/ but our models/ directory
-# is one level up at the project root. This line tells Python
-# where to look when resolving file paths
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# predictor.py lives inside flask_app/ but models/ is one level up
+# This tells Python where to find the models/ directory
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 
-# AutoGluon import
-# We only import TabularPredictor the class that loads and runs
-# the trained AutoGluon ensemble. We don't need to retrain anything.
 from autogluon.tabular import TabularPredictor
-
-# IsolationForest import
-# Needed to load the saved isolation_forest object from joblib
-# Without this import joblib cannot deserialise the object correctly
 from sklearn.ensemble import IsolationForest
 
-
-# Define paths relative to project root
-# os.path.abspath(__file__) gets the absolute path of predictor.py
-# os.path.dirname() twice walks up two levels to the project root
-# This makes the app work regardless of where it's launched from
-BASE_DIR    = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODELS_DIR  = os.path.join(BASE_DIR, 'models')
-AG_PATH     = os.path.join(MODELS_DIR, 'autogluon')
+# Absolute paths — work regardless of where Flask is launched
+BASE_DIR   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MODELS_DIR = os.path.join(BASE_DIR, 'models')
+AG_PATH    = os.path.join(MODELS_DIR, 'autogluon')
 
 
 class FraudPredictor:
     """
     Loads all trained artefacts once at startup and runs the full
-    prediction pipeline for every incoming transaction.
+    hybrid prediction pipeline for every incoming transaction.
 
     Pipeline:
-        1. Scale raw features using saved StandardScaler
-        2. Compute Isolation Forest anomaly score
-        3. Add anomaly score to feature matrix
-        4. AutoGluon predict + predict_proba
-        5. Apply tuned threshold
-        6. Return structured result dict
+        1. Safe feature mapping  — fill missing columns with 0
+        2. StandardScaler        — normalise to training scale
+        3. Isolation Forest      — compute anomaly score
+        4. Normalise score       — map raw score to [0, 1]
+        5. Add anomaly_score     — append as 31st feature
+        6. AutoGluon predict     — weighted ensemble or chosen model
+        7. Apply threshold       — convert probability to decision
+        8. Assign confidence tier
+        9. Return structured dict
     """
 
     def __init__(self):
         print("Loading artefacts...")
 
-        # Load StandardScaler
-        # This scaler was fitted on training data only in Notebook 2
-        # It must be applied to every incoming transaction using the
-        # exact same mean and std values learned during training
+        # StandardScaler
+        # Fitted on training data only in Notebook 2
+        # Must be applied to every transaction before scoring
         self.scaler = joblib.load(
             os.path.join(MODELS_DIR, 'scaler.joblib')
         )
 
-        # Load Isolation Forest
-        # The trained IF model that generates anomaly scores
-        # It was trained on 226,602 legitimate transactions only
+        # Isolation Forest
+        # Trained on 226,602 legitimate transactions only
+        # Generates an unsupervised anomaly score per transaction
         self.isolation_forest = joblib.load(
             os.path.join(MODELS_DIR, 'isolation_forest.joblib')
         )
 
-        # Load normalisation parameters 
-        # global_min and global_max were computed across both
-        # training and test anomaly scores in Notebook 3
-        # We need them to normalise new anomaly scores to [0,1]
-        # using the exact same scale as during training
-        norm_params      = joblib.load(
+        # Normalisation parameters
+        # global_min and global_max computed across training + test
+        # anomaly scores in Notebook 3. Required to map new scores
+        # to the same [0,1] scale AutoGluon was trained with.
+        norm_params     = joblib.load(
             os.path.join(MODELS_DIR, 'anomaly_norm_params.joblib')
         )
-        self.global_min  = norm_params['global_min']
-        self.global_max  = norm_params['global_max']
+        self.global_min = norm_params['global_min']
+        self.global_max = norm_params['global_max']
 
-        # Load decision threshold
-        # 0.41 the threshold that maximised F1-Score during
+        # Decision threshold 
+        # 0.397 — the value that maximised F1-Score during
         # threshold tuning in Notebook 3
         self.threshold = joblib.load(
             os.path.join(MODELS_DIR, 'threshold.joblib')
         )
 
-        # Load AutoGluon predictor 
-        # TabularPredictor.load() reads the entire AutoGluon model
-        # directory all base models and the weighted ensemble
-        # This is AutoGluon's own persistence format, not joblib
+        # AutoGluon predictor 
+        # Loads the entire AutoGluon model directory — all base
+        # models and the weighted ensemble stack
         self.predictor = TabularPredictor.load(AG_PATH)
 
-        # Define expected feature order
-        # The scaler and AutoGluon both expect features in this
-        # exact order. Any mismatch silently corrupts predictions.
+        # Expected feature order 
+        # Scaler and AutoGluon both require this exact column order
+        # Any mismatch silently corrupts predictions
         self.feature_names = (
             ['Time'] +
             [f'V{i}' for i in range(1, 29)] +
             ['Amount']
         )
 
-        print(f"All artefacts loaded.")
-        print(f"Threshold: {self.threshold}")
-        print(f"Features:  {len(self.feature_names)} + anomaly_score")
+        print("All artefacts loaded.")
+        print(f"Threshold:  {self.threshold}")
+        print(f"Features:   {len(self.feature_names)} + anomaly_score")
 
 
-    def predict(self, raw_input: dict, model_name: str = None) -> dict:
+    def get_models(self) -> list:
+        """
+        Returns all AutoGluon model names from the leaderboard.
+        Called by the /api/models endpoint to populate the
+        ModelSelector dropdown in the React frontend.
+
+        Returns:
+            List of model name strings
+        """
+        # leaderboard() returns a DataFrame we extract the
+        # 'model' column and convert to a plain Python list
+        lb = self.predictor.leaderboard(silent=True)
+        return lb['model'].tolist()
+
+
+    def predict(
+        self,
+        raw_input: dict,
+        model_name: str = None
+    ) -> dict:
         """
         Run the full prediction pipeline for one transaction.
 
         Args:
-            raw_input:  dict with keys matching feature_names
-        model_name: optional AutoGluon model to use.
-                    None uses the best model automatically.
+            raw_input:  Dict of feature_name → value.
+                        Can be missing fields — they default to 0.
+            model_name: Optional AutoGluon model name.
+                        None uses the best model (WeightedEnsemble).
+
         Returns:
-            dict with decision, probability, confidence tier,
-            threshold used, and feature values for display
+            Dict with decision, probabilities, tier, and raw input.
         """
 
-        # step 1 — Build one-row DataFrame
-        # pd.DataFrame([raw_input]) converts the dict to a single
-        # row DataFrame. The [self.feature_names] ensures columns
-        # are in the exact order the scaler expects
-        raw_df = pd.DataFrame([raw_input])[self.feature_names]
+        # Step 1 — Safe feature mapping 
+        # .get(feat, 0.0) fills any missing column with 0
+        # This prevents crashes when a CSV is missing V28 etc.
+        # We then enforce the exact column order the scaler expects
+        safe_input = {
+            feat: float(raw_input.get(feat, 0.0))
+            for feat in self.feature_names
+        }
+        raw_df = pd.DataFrame([safe_input])[self.feature_names]
 
-        # step 2 — Scale features using saved StandardScaler
-        # transform() applies the saved scaler parameters
-        # We never call fit_transform() here that would refit
-        # the scaler on a single transaction which is meaningless
+        # Step 2 — Scale features
+        # transform() applies saved mean and std from training
+        # We never call fit_transform() — that would refit on one
+        # transaction which is meaningless and causes data leakage
         scaled_array = self.scaler.transform(raw_df)
         scaled_df    = pd.DataFrame(
             scaled_array,
             columns=self.feature_names
         )
 
-        # step 3 — Compute Isolation Forest anomaly score
-        # decision_function() returns a raw anomaly score
-        # Negative = anomalous (likely fraud)
-        # Positive = normal (likely legitimate)
-        raw_score = self.isolation_forest.decision_function(scaled_df)[0]
+        # Step 3 — Isolation Forest anomaly score 
+        # decision_function returns a raw score:
+        #   negative = anomalous (likely fraud)
+        #   positive = normal (likely legitimate)
+        raw_score = self.isolation_forest.decision_function(
+            scaled_df
+        )[0]
 
-        # step 4 — Normalise anomaly score to [0, 1]
-        # We flip the sign so higher score = more fraudulent
-        # Then normalise using the global min/max from training
+        # Step 4 — Normalise anomaly score to [0, 1]
+        # Flip sign so higher = more fraudulent
+        # Then normalise using the same global min/max from training
         # so the scale is consistent with what AutoGluon learned
-        flipped          = -raw_score
-        global_min_flip  = -self.global_max
-        global_max_flip  = -self.global_min
-        anomaly_score    = (flipped - global_min_flip) / \
-                           (global_max_flip - global_min_flip)
+        flipped         = -raw_score
+        global_min_flip = -self.global_max
+        global_max_flip = -self.global_min
+        anomaly_score   = (
+            (flipped - global_min_flip) /
+            (global_max_flip - global_min_flip)
+        )
 
-        # step 5 — Add anomaly score to feature matrix 
-        # AutoGluon was trained with anomaly_score as the 31st
-        # feature. We must add it in the same position here.
+        # Step 5 — Add anomaly score as 31st feature 
+        # AutoGluon was trained with anomaly_score included
+        # It must appear in every inference call in the same position
         scaled_df['anomaly_score'] = anomaly_score
 
-        # step 6 — AutoGluon prediction 
-        # If model_name is provided, score with that specific model
-    # If None, AutoGluon uses WeightedEnsemble automatically
+        # Step 6 — AutoGluon prediction 
+        # If model_name is provided → score with that specific model
+        # If None → AutoGluon uses WeightedEnsemble automatically
+        # predict_proba returns DataFrame: col 0 = P(legit), col 1 = P(fraud)
         if model_name:
             proba_df = self.predictor.predict_proba(
-            scaled_df, model=model_name
-         )
+                scaled_df,
+                model=model_name
+            )
         else:
             proba_df = self.predictor.predict_proba(scaled_df)
 
         fraud_prob = float(proba_df[1].iloc[0])
 
-        # step 7 — Apply threshold 
-        # If fraud probability >= threshold → flag as FRAUD
-        # If fraud probability < threshold  → clear as LEGITIMATE
+        # Step 7 — Apply threshold 
+        # Threshold was tuned to maximise F1-Score in Notebook 3
+        # Above threshold → FRAUD, below → LEGITIMATE
         decision = 'FRAUD' if fraud_prob >= self.threshold else 'LEGITIMATE'
 
-        # step 8 — Assign confidence tier 
+        # Step 8 — Confidence tier
         confidence_tier = self._get_confidence_tier(
             fraud_prob, decision
         )
 
-        # step 9 — Return structured result 
+        # Step 9 — Return structured result 
         return {
             'decision':          decision,
             'fraud_probability': round(fraud_prob * 100, 2),
             'confidence_tier':   confidence_tier,
-            'threshold_used':    round(self.threshold * 100, 2),
+            'threshold_used':    round(float(self.threshold) * 100, 2),
             'anomaly_score':     round(float(anomaly_score) * 100, 2),
+            'model_used':        model_name or 'WeightedEnsemble (Best)',
             'raw_input':         raw_input
         }
 
 
-    def _get_confidence_tier(self, prob: float, decision: str) -> str:
+    def _get_confidence_tier(
+        self,
+        prob: float,
+        decision: str
+    ) -> str:
         """
-        Translate raw fraud probability into a human-readable
-        confidence tier for the Flask result page.
+        Converts raw probability to a human-readable confidence tier.
 
-        FRAUD tiers:
-            HIGH   — model is very confident (prob >= 0.90)
-            MEDIUM — model suspects fraud (prob >= threshold)
+        FRAUD:
+            HIGH   → prob >= 0.90  (act immediately)
+            MEDIUM → prob >= threshold but < 0.90 (investigate)
 
-        LEGITIMATE tiers:
-            CLEAR  — model is very confident (prob <= 0.30)
-            REVIEW — low fraud probability but worth monitoring
+        LEGITIMATE:
+            CLEAR  → prob <= 0.30  (no action needed)
+            REVIEW → prob > 0.30 but < threshold (monitor)
         """
         if decision == 'FRAUD':
             return 'HIGH'   if prob >= 0.90 else 'MEDIUM'
@@ -208,10 +233,8 @@ class FraudPredictor:
             return 'CLEAR'  if prob <= 0.30 else 'REVIEW'
 
 
-# Instantiate once at module level
-# Python imports are cached this block runs exactly once when
-# Flask first imports predictor.py. Every subsequent request
-# reuses the same FraudPredictor instance already in memory.
-# Loading a full AutoGluon ensemble takes several seconds
-# doing it per-request would make the app unusably slow.
+#  Singleton instantiation 
+# Python caches imports this runs exactly once when Flask starts
+# Every request reuses the same in-memory FraudPredictor object
+# Loading AutoGluon per-request would add 10+ seconds per call
 predictor = FraudPredictor()
