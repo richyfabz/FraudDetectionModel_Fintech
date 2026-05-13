@@ -1,7 +1,9 @@
 # Fraud Detection Model Fintech MLOps Stack
 
-A production-grade fraud detection system built on the Kaggle Credit Card Fraud Detection dataset. The system combines a stacking ensemble of XGBoost and Random Forest models with real-time SHAP explanations, served via a FastAPI REST API. Every fraud decision includes a full audit trail of feature contributions meeting the explainability requirements of production fintech compliance.
-
+A production-grade credit card fraud detection system combining
+unsupervised anomaly detection with automated ensemble learning.
+Built on 284,807 real European cardholder transactions with a
+full-stack deployment Flask REST API + React frontend.
 
 ## Table of Contents
 
@@ -14,7 +16,6 @@ A production-grade fraud detection system built on the Kaggle Credit Card Fraud 
 - [Model Performance](#model-performance)
 - [API Reference](#api-reference)
 - [Running the Project](#running-the-project)
-- [Running Tests](#running-tests)
 - [Docker Deployment](#docker-deployment)
 
 ---
@@ -23,76 +24,33 @@ A production-grade fraud detection system built on the Kaggle Credit Card Fraud 
 
 Credit card fraud detection is a class imbalance problem at an industrial scale 99.83% of transactions are legitimate and only 0.17% are fraudulent. A naive model that predicts every transaction as legitimate achieves 99.83% accuracy while catching zero fraud. This project solves that problem through a combination of:
 
-- **SMOTE** to synthetically balance the training set without touching the test set
-- **Stacking ensemble** to combine the complementary strengths of gradient boosting and bagging
+- **Stacking ensemble** to combine the complementary strengths of unsupervised learming, gradient boosting and bagging
 - **Threshold tuning** to find the optimal decision boundary that maximises F1-Score
-- **SHAP explainability** to produce a per-prediction audit trail for every fraud decision
-- **FastAPI** to serve all of the above as a production REST endpoint with structured JSON responses
+- **FlaskAPI** to serve all of the above as a production REST endpoint with structured JSON responses
 
 ---
 
 ## Architecture
-
-TRAINING PIPELINE (offline, runs once)
-───────────────────────────────────────
 ```
-creditcard.csv
+Raw Transaction (30 features)
 │
 ▼
-src/features.py     engineer_features()
-│                   Time → hour_sin/cos (cyclical encoding)
-│                   Amount → amount_log (log1p transform)
-│                   Drops: Time, Amount, hour
-▼
-src/preprocess.py   split_data()
-│                   Stratified 80/20 train/test split
-│                   random_state=42, stratify=y
-▼
-src/preprocess.py   fit_scaler() → apply_scaler()
-│                   RobustScaler fitted on training data only
-│                   Robust to high-value outliers retained as fraud signal
-▼
-src/preprocess.py   apply_smote()
-│                   SMOTE sampling_strategy=1.0
-│                   226,602 legitimate → balanced with 226,602 synthetic fraud
-│                   Training set: 453,204 rows
-▼
-src/train.py        build_model() → train()
-│                   Level 0: XGBoost + Random Forest (cv=5)
-│                   Level 1: Logistic Regression meta-learner
-│                   StackingClassifier, n_jobs=-1
-▼
-models/
-├── ensemble_model.joblib   (~15.7 MB)
-├── scaler.joblib           (~1.6 KB)
-└── threshold.joblib        (~0.1 KB)
-INFERENCE PIPELINE (live, runs on every API request)
-──────────────────────────────────────────────────────────────────
-POST /predict  ←  raw transaction JSON
+StandardScaler — normalise all features to equal magnitude
 │
 ▼
-api/schema.py           TransactionRequest validation (Pydantic)
-│                   Validates all 30 fields present and typed correctly
+Isolation Forest — unsupervised anomaly score
+trained on 226,602 legitimate transactions only
+│
 ▼
-src/features.py         engineer_features()
-│                   Same function as training — guaranteed consistency
+AutoGluon WeightedEnsemble — supervised classification
+31 features (30 original + anomaly score)
+RandomForest + LightGBM + CatBoost + ExtraTrees
+│
 ▼
-src/preprocess.py       scale_single()
-│                   Applies saved RobustScaler — never refits
+Threshold 0.397 — tuned to maximise F1-Score
+│
 ▼
-models/ensemble_model   predict_proba()
-│                   Returns P(fraud) between 0.0 and 1.0
-▼
-src/evaluate.py         apply_threshold()
-│                   Threshold = 0.77 (tuned on test set)
-│                   P(fraud) >= 0.77 → FRAUD
-▼
-src/evaluate.py         format_shap_explanation()
-│                   TreeExplainer on XGBoost base model
-│                   Top 10 feature contributions ranked by |SHAP value|
-▼
-api/schema.py           TransactionResponse
-decision + probability + confidence_tier + explanation
+FRAUD / LEGITIMATE + confidence tier + anomaly score
 ```
 ## Dataset
 
@@ -104,49 +62,49 @@ decision + probability + confidence_tier + explanation
 | Features | V1–V28 (PCA), Time, Amount |
 | Target | Class (0=Legitimate, 1=Fraud) |
 | Fraud rate | 0.17% (473 cases) |
-| Train split | 226,980 rows |
-| Test split | 56,746 rows |
-| After SMOTE | 453,204 training rows (balanced) |
+| Train split |  198,608 rows |
+| Test split | 585,118 rows |
 
 The V1–V28 features are PCA-transformed components from the original transaction data, provided pre-anonymised by the dataset authors. Time and Amount are the only original unmasked features.
 
 ## Tech Stack
 
-| Layer | Library | Version |
-|---|---|---|
-| Language | Python | 3.10+ |
-| Data processing | Pandas, NumPy | — |
-| Preprocessing | Scikit-learn | — |
-| Imbalance handling | Imbalanced-learn | — |
-| Base model 1 | XGBoost | — |
-| Base model 2 | Scikit-learn RandomForest | — |
-| Meta-learner | Scikit-learn LogisticRegression | — |
-| Explainability | SHAP | — |
-| API framework | FastAPI | — |
-| API server | Uvicorn | — |
-| Validation | Pydantic | — |
-| Serialisation | Joblib | — |
-| Testing | Pytest | — |
-| Containerisation | Docker | — |
+### Machine Learning
+```
+| Component | Technology |
+|---|---|
+| Anomaly Detection | Isolation Forest (sklearn) |
+| AutoML Framework | AutoGluon 1.5.0 |
+| Base Models | Random Forest, LightGBM, CatBoost, ExtraTrees, KNN |
+| Meta-Learner | WeightedEnsemble L2 |
+| Feature Scaling | StandardScaler |
+| Serialisation | Joblib |
+```
+### Backend
+```
+| Component | Technology |
+|---|---|
+| API Framework | Flask |
+| Cross-Origin | Flask-CORS |
+| Data Processing | Pandas, NumPy |
+| Python Version | 3.10+ |
+```
 
+### Frontend
+```
+| Component | Technology |
+|---|---|
+| Framework | React 19 |
+| Routing | React Router v6 |
+| Animations | Framer Motion |
+| Styling | Tailwind CSS v3 |
+| HTTP Client | Axios |
+| Icons | Lucide React |
+```
 
 ## Project Structure
 ```
 FraudDetection/
-│
-├── api/
-│   ├── init.py
-│   ├── main.py             # FastAPI app — routing only
-│   ├── predictor.py        # FraudPredictor class — all inference logic
-│   └── schema.py           # Pydantic request and response schemas
-│
-├── data/
-│   └── creditcard.csv      # Raw dataset (not committed to git)
-│
-├── models/
-│   ├── ensemble_model.joblib
-│   ├── scaler.joblib
-│   └── threshold.joblib
 │
 ├── notebooks/
 │   ├── 01_data_ingestion_and_eda.ipynb
@@ -154,205 +112,249 @@ FraudDetection/
 │   ├── 03_model_training_and_evaluation.ipynb
 │   └── 04_explainability_and_shap.ipynb
 │
-├── Plots/
-│   ├── evaluation_threshold_tuning.png
-│   ├── shap_global_importance.png
-│   ├── shap_summary_dot.png
-│   └── shap_waterfall_fraud.png
+├── flask_app/
+│   ├── app.py              # Flask API — 5 endpoints
+│   └── predictor.py        # FraudPredictor class — full pipeline
+│
+├── frontend/
+│   ├── src/
+│   │   ├── App.js          # Router setup
+│   │   ├── components/
+│   │   │   └── Navbar.jsx
+│   │   ├── pages/
+│   │   │   ├── Landing.jsx
+│   │   │   ├── HowItWorks.jsx
+│   │   │   ├── FeatureGuide.jsx
+│   │   │   ├── Analyser.jsx
+│   │   │   └── BulkUpload.jsx
+│   │   └── sampleTransactions.json
+│   └── package.json
+│
+├── models/
+│   ├── autogluon/          # AutoGluon model directory
+│   ├── isolation_forest.joblib
+│   ├── scaler.joblib
+│   ├── threshold.joblib
+│   └── anomaly_norm_params.joblib
+│
+├── data/
+│   └── creditcard.csv      # Not committed — download from Kaggle
 │
 ├── src/
-│   ├── init.py
-│   ├── features.py         # Feature engineering
-│   ├── preprocess.py       # Scaling and SMOTE
-│   ├── train.py            # Model training and serialisation
-│   └── evaluate.py         # Metrics, threshold tuning, SHAP formatting
+│   ├── features.py
+│   ├── preprocess.py
+│   ├── train.py
+│   └── evaluate.py
 │
 ├── tests/
-│   ├── test_features.py    # Unit tests — feature engineering
-│   └── test_predictor.py   # Integration tests — full prediction pipeline
+│   ├── test_features.py
+│   └── test_predictor.py
 │
-├── .gitignore
 ├── Dockerfile
-├── README.md
-└── requirements.txt
+├── requirements.txt
+└── README.md
 ```
 
 ## Pipeline Stages
 
-### Stage 1 — Data Ingestion
-Loaded 284,807 rows from the Kaggle dataset. Confirmed zero null values across all 31 columns. Removed 1,081 duplicate rows leaving 283,726 clean rows. Confirmed 473 fraud cases after deduplication.
+### Stage 1 — Data Ingestion and EDA
+- 284,807 transactions loaded from Kaggle Credit Card Fraud dataset
+- 1,081 duplicates removed 283,726 clean rows
+- Zero null values confirmed across all 31 columns
+- Class imbalance: 99.83% legitimate vs 0.17% fraud 578:1 ratio
+- Outlier analysis: fraud rate in high-value transactions 65% above average
+- Key predictors identified: V14, V17, V4, V12
 
-### Stage 2 — Exploratory Data Analysis
-Analysed class imbalance — 99.83% legitimate vs 0.17% fraud, ratio of 578:1. Confirmed Amount is right-skewed with fraud transactions having a higher mean (€122 vs €88) — log transform required. Confirmed Time distribution shows fraud is uniformly distributed across all hours while legitimate transactions peak at daytime cyclical encoding required. Detected 31,685 Amount outliers fraud rate in outlier group (0.2746%) is 65% higher than overall outliers retained as genuine fraud signal. Identified V14, V17, V12, V10 as strongest negative predictors and V11, V4 as strongest positive predictors via correlation heatmap.
+### Stage 2 — Preprocessing
+- All 30 features kept Time, Amount, V1–V28 — nothing dropped
+- Stratified 80/20 train/test split preserving 0.1667% fraud rate
+- StandardScaler fitted on training data only test set never touches scaler fitting
+- 226,602 legitimate transactions isolated for Isolation Forest training
 
-### Stage 3 — Preprocessing
-Stratified 80/20 train/test split preserving the 0.17% fraud rate in both splits. RobustScaler chosen over StandardScaler uses median and IQR instead of mean and standard deviation, making it robust to the high-value outliers retained as fraud signal. Scaler fitted on training data only, applied identically to test set and API inference.
+### Stage 3 — Isolation Forest
+- 100 isolation trees, contamination=0.001667 (known fraud rate)
+- Trained exclusively on legitimate transactions fully unsupervised
+- Anomaly score computed for all transactions and normalised to [0,1]
+- Feature importance extracted Time ranked 2nd, Amount 11th
 
-### Stage 4 — Feature Engineering
-Time converted to hour of day using `(Time / 3600) % 24`. Hour encoded cyclically using `sin(2π × hour/24)` and `cos(2π × hour/24)` — ensures midnight and 23:59 are numerically close. Amount log-transformed using `log1p(Amount)` compresses the right-skewed distribution and handles zero-value transactions safely. Original Time, Amount, and intermediate hour columns dropped. Final feature count: 31.
+### Stage 4 — AutoGluon Ensemble
+- 31 features: 30 original + IF anomaly score
+- 10-minute training budget, best_quality preset
+- Models trained: Random Forest, LightGBM, CatBoost, ExtraTrees, KNN
+- 8-fold bagging per model
+- WeightedEnsemble L2 selected as best model
 
-### Stage 5 — SMOTE
-Applied to training set only. Generates synthetic fraud examples by interpolating between real fraud cases in feature space using k-nearest neighbours. Balances training set from 226,602 legitimate / 378 fraud to 226,602 / 226,602 — final training shape 453,204 × 31. Test set remains untouched at 56,746 rows.
+### Stage 5 — Threshold Tuning
+- 200 candidate thresholds swept from 0 to 1
+- F1-Score maximised at threshold 0.397
+- Default 0.5 threshold gives F1 0.8855
+- Tuned threshold gives F1 0.8939
 
-### Stage 6 — Model Training
-Stacking ensemble with 5-fold cross-validation. XGBoost (gradient boosting captures complex non-linear patterns) and Random Forest (bagging robust to outliers, prevents overfitting) as Level 0 base models. Logistic Regression as Level 1 meta-learner learns to weight base model predictions optimally. Training time approximately 38 minutes on 453k rows.
+### Stage 6 — Flask REST API
+- 5 endpoints: /api/health, /api/models, /api/features,
+  /api/predict, /api/predict/batch
+- Model selection user can choose any AutoGluon model
+- Batch scoring accepts any CSV format, fills missing columns with 0
+- Safe feature mapping missing features default to 0
 
-### Stage 7 — Evaluation and Threshold Tuning
-Evaluated on 56,746 unseen test transactions. AUC-ROC 0.9755 model correctly ranks fraud above legitimate 97.55% of the time. Default threshold F1 0.8457. Threshold sweep from 0.01 to 0.99 identified 0.77 as optimal F1 improves to 0.8555. Final confusion matrix: 74 fraud caught, 21 missed, 6 false alarms, 56,645 legitimate correctly cleared.
-
-### Stage 8 — SHAP Explainability
-TreeExplainer applied to XGBoost base model on full test set. Global feature importance confirms V14 and V4 as dominant predictors. hour_cos and hour_sin rank 3rd and 4th validating the cyclical encoding decision. Per-prediction waterfall plots show individual feature contributions for audit trail generation.
-
-### Stage 9 — FastAPI Deployment
-REST API with two endpoints. All artefacts loaded once at startup. Every `/predict` response includes the fraud decision, probability, confidence tier, threshold used, and top 10 SHAP feature contributions. Full pipeline from raw JSON to structured response runs in under one second.
+### Stage 7 — React Frontend
+- 5 pages: Landing, How It Works, Feature Guide, Analyser, Bulk Upload
+- Live model selector fetches available models from Flask
+- 20 real test transactions embedded for demo (10 fraud + 10 legitimate)
+- Batch CSV upload with results table, summary stats, and CSV download
+- Framer Motion animations throughout
 
 ---
 
 ## Model Performance
-
+```
 | Metric | Value |
 |---|---|
-| AUC-ROC | 0.9755 |
-| F1-Score (default threshold 0.5) | 0.8457 |
-| F1-Score (tuned threshold 0.77) | 0.8555 |
-| Optimal threshold | 0.77 |
-| Fraud precision | 0.93 |
-| Fraud recall | 0.78 |
-| True positives (fraud caught) | 74 |
-| False negatives (fraud missed) | 21 |
-| False positives (false alarms) | 6 |
-| True negatives (legitimate cleared) | 56,645 |
-| Test set size | 56,746 transactions |
-
----
+| AUC-ROC | 0.9610 |
+| F1-Score (tuned threshold) | 0.8939 |
+| Fraud Precision | 97% |
+| Fraud Recall | 82% |
+| Fraud Cases Caught | 116 / 142 |
+| False Alarms | 4 / 84,976 |
+| Training Accuracy | 99.9995% |
+| Test Accuracy | 99.9648% |
+| Train/Test Gap | 0.000347 — no overfitting |
+| Test Transactions | 85,118 |
+```
 
 ## API Reference
 
-### GET /health
-
-Returns API status and loaded model information.
-
-**Response:**
+### GET /api/health
 ```json
 {
-  "status": "healthy",
-  "model": "StackingClassifier",
-  "threshold": 0.77
+  "status": "active",
+  "model_loaded": true,
+  "threshold": 0.397
 }
 ```
+### GET /api/models
+Returns all AutoGluon models available for selection.
 
-### POST /predict
+### GET /api/features
+Returns metadata for all 30 features including descriptions
+and importance ratings.
 
-Score a single transaction for fraud.
-
-**Request body:**
+### POST /api/predict
 ```json
+// Request
 {
   "Time": 406.0,
   "Amount": 229.15,
   "V1": -3.043541,
-  "V2": -3.157307,
-  "...": "V3 through V28"
+  "...": "V2 through V28",
+  "selected_model": "WeightedEnsemble_L2"
 }
-```
 
-**Response:**
-```json
+// Response
 {
-  "transaction_id": null,
   "decision": "FRAUD",
-  "fraud_probability": 0.9998,
-  "confidence_tier": "HIGH",
-  "threshold_used": 0.77,
-  "top_features": [
-    {
-      "feature": "V14",
-      "shap_value": 5.15,
-      "direction": "toward_fraud"
-    }
-  ]
+  "fraud_probability": 61.61,
+  "confidence_tier": "MEDIUM",
+  "threshold_used": 39.7,
+  "anomaly_score": 41.8,
+  "model_used": "WeightedEnsemble_L2",
+  "raw_input": {}
 }
 ```
 
-**Confidence tiers:**
+### POST /api/predict/batch
+Accepts multipart CSV upload or JSON array.
+Returns array of predictions with summary statistics.
 
-| Tier | Condition | Meaning |
+
+## Confidence Tiers
+```
+| Tier | Condition | Action |
 |---|---|---|
-| HIGH | FRAUD and P >= 0.90 | Immediate action required |
-| MEDIUM | FRAUD and P < 0.90 | Investigate |
-| REVIEW | LEGITIMATE and P > 0.30 | Monitor — borderline case |
-| CLEAR | LEGITIMATE and P <= 0.30 | No action required |
+| HIGH | FRAUD and P ≥ 90% | Immediate block |
+| MEDIUM | FRAUD and P < 90% | Investigate |
+| REVIEW | LEGITIMATE and P > 30% | Monitor |
+| CLEAR | LEGITIMATE and P ≤ 30% | No action |
+```
 
-**Interactive docs:** `http://127.0.0.1:8000/docs`
 
 
 ## Running the Project
 
-**1. Clone the repository**
+**1. Clone and set up environment**
 ```bash
 git clone https://github.com/richyfabz/FraudDetectionModel_Fintech.git
 cd FraudDetection
-```
-
-**2. Create virtual environment**
-```bash
 python3.10 -m venv venv
 source venv/bin/activate
-```
-
-**3. Install dependencies**
-```bash
 pip install -r requirements.txt
 ```
 
-**4. Add the dataset**
+**2. Download the dataset**
 
-Download `creditcard.csv` from [Kaggle](https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud) and place it in `data/creditcard.csv`.
+Download `creditcard.csv` from
+[Kaggle Credit Card Fraud Detection](https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud)
+and place it at `data/creditcard.csv`.
 
-**5. Train the model**
+**3. Train the model (optional — models already serialised)**
 ```bash
+# Run notebooks 01 through 03 in order
+# Or retrain from command line:
 python -m src.train
 ```
 
-**6. Start the API**
+**4. Start Flask API**
 ```bash
-uvicorn api.main:app --reload
+cd flask_app
+source ../venv/bin/activate
+python app.py
+# Running on http://127.0.0.1:5000
 ```
 
-API is live at `http://127.0.0.1:8000`
-
----
-
-## Running Tests
-
+**5. Start React frontend**
 ```bash
-python -m pytest tests/ -v
+cd frontend
+npm install
+npm start
+# Running on http://localhost:3000
 ```
-
-24 tests across two files unit tests for feature engineering and integration tests for the full prediction pipeline.
-
-
-## Docker Deployment
-
-Build and run the containerised API:
-
-```bash
-docker build -t fraud-detection .
-docker run -p 8000:8000 fraud-detection
-```
-
-API is live at `http://localhost:8000`
 
 ---
 
 ## Key Design Decisions
 
-**RobustScaler over StandardScaler** — high-value transactions carry genuine fraud signal and were intentionally retained. StandardScaler's mean and standard deviation would be distorted by these outliers. RobustScaler's median and IQR are unaffected.
+**Isolation Forest on legitimate transactions only** —
+Training on all transactions would teach the model that fraud
+is "normal." Training on legitimate transactions only means
+any deviation from normal behaviour — including new fraud
+patterns never seen before — gets flagged.
 
-**Cyclical time encoding** — raw Time in seconds is a weak linear feature. Sin/cos encoding of hour of day ensures midnight and 23:59 are numerically adjacent, allowing the model to detect time-of-day fraud patterns correctly. SHAP confirmed hour_cos and hour_sin rank 3rd and 4th globally.
+**Anomaly score as a feature** — Rather than using Isolation
+Forest as the final classifier (which gives poor precision),
+its output is passed to AutoGluon as a pre-computed signal.
+AutoGluon learns when to trust and when to discount it.
 
-**Threshold tuning to 0.77** — the default 0.5 threshold optimises for balanced classes. For a heavily imbalanced fraud problem, sweeping thresholds and selecting on F1-Score finds the boundary that best balances catching fraud against generating false alarms.
+**Time and Amount kept raw** — Previous architecture dropped
+both. Isolation Forest ranked Time 2nd most important.
+Dropping them caused the model to miss 4 out of 10 fraud
+cases in the demonstration test.
 
-**SHAP on XGBoost base model** — TreeExplainer computes exact Shapley values using the tree structure directly. Applied to the XGBoost base model rather than the full stacking ensemble because TreeExplainer requires a tree-based model. XGBoost is the strongest predictor in the ensemble and its feature attributions are representative of the overall decision logic.
+**No SMOTE** — The Isolation Forest anomaly score already
+encodes the imbalance signal. AutoGluon's scale_pos_weight
+handles class weighting internally. SMOTE generated synthetic
+overlap that caused data leakage.
 
-**FraudPredictor class** — isolates all inference logic from API routing. Independently instantiable and testable without running the HTTP server. Artefacts loaded once at startup and reused across all requests loading a 15.7MB model per request would be unacceptable latency.
+**Threshold tuning to 0.397** — The default 0.5 threshold
+assumes balanced classes. Sweeping 200 candidate thresholds
+and selecting on F1-Score finds the boundary optimal for a
+578:1 imbalanced distribution.
+
+
+## Dataset
+
+- Source: Kaggle Credit Card Fraud Detection
+- Transactions: 284,807 (283,726 after deduplication)
+- Features: V1–V28 (PCA), Time, Amount
+- Target: Class (0=Legitimate, 1=Fraud)
+- Fraud rate: 0.1667% (473 cases)
+- Time period: 48 hours of European cardholder transactions
