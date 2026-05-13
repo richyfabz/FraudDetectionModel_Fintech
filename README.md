@@ -323,28 +323,28 @@ npm start
 
 ## Key Design Decisions
 
-**Isolation Forest on legitimate transactions only** —
+**Isolation Forest on legitimate transactions only** 
 Training on all transactions would teach the model that fraud
 is "normal." Training on legitimate transactions only means
-any deviation from normal behaviour — including new fraud
-patterns never seen before — gets flagged.
+any deviation from normal behaviour including new fraud
+patterns never seen before  gets flagged.
 
-**Anomaly score as a feature** — Rather than using Isolation
+**Anomaly score as a feature**  Rather than using Isolation
 Forest as the final classifier (which gives poor precision),
 its output is passed to AutoGluon as a pre-computed signal.
 AutoGluon learns when to trust and when to discount it.
 
-**Time and Amount kept raw** — Previous architecture dropped
+**Time and Amount kept raw** Previous architecture dropped
 both. Isolation Forest ranked Time 2nd most important.
 Dropping them caused the model to miss 4 out of 10 fraud
 cases in the demonstration test.
 
-**No SMOTE** — The Isolation Forest anomaly score already
+**No SMOTE** The Isolation Forest anomaly score already
 encodes the imbalance signal. AutoGluon's scale_pos_weight
 handles class weighting internally. SMOTE generated synthetic
 overlap that caused data leakage.
 
-**Threshold tuning to 0.397** — The default 0.5 threshold
+**Threshold tuning to 0.397** The default 0.5 threshold
 assumes balanced classes. Sweeping 200 candidate thresholds
 and selecting on F1-Score finds the boundary optimal for a
 578:1 imbalanced distribution.
