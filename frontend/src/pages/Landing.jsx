@@ -138,7 +138,7 @@ export default function Landing() {
         {/* Title */}
         <h1 className="text-5xl sm:text-7xl font-black
                        tracking-tight mb-6">
-          <span className="text-white">Richy FraudGuard</span>
+          <span className="text-white"> FraudGuard</span>
           <br />
           <span className="bg-gradient-to-r from-blue-400
                           to-purple-400 bg-clip-text
